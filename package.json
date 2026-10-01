@@ -1,0 +1,2 @@
+{ "name": "briwill-inbox", "private": true, "type": "module",
+  "dependencies": { "@neondatabase/serverless": "latest" } }
