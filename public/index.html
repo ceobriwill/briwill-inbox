@@ -343,6 +343,51 @@
       #go:disabled {
         opacity: 0.5;
       }
+      #login {
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        background: var(--app);
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      #login[hidden] {
+        display: none;
+      }
+      #lf {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 28px;
+        width: 100%;
+        max-width: 360px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      #lf input {
+        border: 0;
+        background: var(--hover);
+        border-radius: 12px;
+        padding: 12px 14px;
+        font-size: 16px;
+        outline: 0;
+      }
+      #lf button {
+        border: 0;
+        border-radius: 12px;
+        background: var(--brand);
+        color: #fff;
+        padding: 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      #lerr {
+        min-height: 18px;
+        font-size: 12px;
+        color: var(--err);
+      }
       @media (max-width: 767px) {
         body {
           display: block;
@@ -388,6 +433,21 @@
     </style>
   </head>
   <body>
+    <div id="login">
+      <form id="lf">
+        <h1>Briwill Inbox</h1>
+        <div class="sub">Sign in to continue</div>
+        <input
+          id="pw"
+          type="password"
+          placeholder="Password"
+          autocomplete="current-password"
+          required
+        />
+        <div id="lerr"></div>
+        <button type="submit">Sign in</button>
+      </form>
+    </div>
     <aside id="list">
       <div id="lh">
         <div>
@@ -446,8 +506,9 @@
       </section>
     </main>
     <script>
-      let pw = sessionStorage.pw || prompt("Admin password") || "";
-      sessionStorage.pw = pw;
+      const IDLE_MS = 15 * 60 * 1000;
+      let token = sessionStorage.token || "",
+        lastActive = Date.now();
       const $ = (id) => document.getElementById(id);
       const el = (t, c, x) => {
         const e = document.createElement(t);
@@ -466,13 +527,12 @@
         const r = await fetch(path, {
           ...opt,
           headers: {
-            "x-admin-password": pw,
+            Authorization: "Bearer " + token,
             "Content-Type": "application/json",
           },
         });
         if (r.status === 401) {
-          sessionStorage.removeItem("pw");
-          location.reload();
+          lock("Session expired. Please sign in again.");
           return {};
         }
         return r.json();
@@ -675,12 +735,76 @@
           }),
       );
       window.addEventListener("hashchange", route);
-      loadList().then(route);
+
+      function lock(msg) {
+        token = "";
+        sessionStorage.removeItem("token");
+        convs = [];
+        cur = null;
+        listKey = threadKey = "";
+        $("rows").replaceChildren();
+        $("msgs").replaceChildren();
+        $("q").value = "";
+        if (location.hash) location.hash = "";
+        document.body.classList.remove("open");
+        $("lerr").textContent = msg || "";
+        $("pw").value = "";
+        $("login").hidden = false;
+        $("pw").focus();
+      }
+      function checkIdle() {
+        if (token && Date.now() - lastActive > IDLE_MS)
+          lock("Signed out after 15 minutes of inactivity.");
+      }
+      for (const ev of [
+        "click",
+        "keydown",
+        "touchstart",
+        "scroll",
+        "mousemove",
+      ])
+        window.addEventListener(
+          ev,
+          () => {
+            lastActive = Date.now();
+          },
+          { passive: true, capture: true },
+        );
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) checkIdle();
+      });
+
+      $("lf").onsubmit = async (e) => {
+        e.preventDefault();
+        $("lerr").textContent = "";
+        const r = await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: $("pw").value }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          $("lerr").textContent = j.error || "Sign in failed";
+          return;
+        }
+        token = j.token;
+        sessionStorage.token = token;
+        lastActive = Date.now();
+        $("login").hidden = true;
+        $("pw").value = "";
+        loadList().then(route);
+      };
       setInterval(() => {
-        if (document.hidden) return;
+        if (!token) return;
+        checkIdle();
+        if (!token || document.hidden) return;
         loadList();
         if (cur) loadThread(false);
       }, 8000);
+      if (token) {
+        $("login").hidden = true;
+        loadList().then(route);
+      } else $("pw").focus();
     </script>
   </body>
 </html>
