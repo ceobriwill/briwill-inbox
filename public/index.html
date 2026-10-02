@@ -1,76 +1,686 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Briwill Inbox</title>
-<style>
-*{box-sizing:border-box}body{margin:0;height:100vh;display:flex;font:14px system-ui,sans-serif;background:#f4f5f7;color:#111}
-#list{width:320px;overflow:auto;background:#fff;border-right:1px solid #ddd}
-.c{padding:12px 14px;border-bottom:1px solid #eee;cursor:pointer}.c:hover,.c.on{background:#eef2ff}
-.c b{display:flex;justify-content:space-between}.c small{display:block;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.u{background:#2563eb;color:#fff;border-radius:10px;padding:0 7px;font-size:12px}
-#main{flex:1;display:flex;flex-direction:column;min-width:0}
-#head{padding:12px 16px;background:#fff;border-bottom:1px solid #ddd;font-weight:600}
-#note{display:none;padding:6px 16px;background:#fef3c7;color:#92400e;font-size:12px}
-#msgs{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:6px}
-.m{max-width:70%;padding:8px 11px;border-radius:10px;background:#fff;white-space:pre-wrap;overflow-wrap:anywhere}
-.m.out{align-self:flex-end;background:#dcf8c6}.m i{display:block;margin-top:3px;font-size:11px;color:#777;font-style:normal}
-.m i.err{color:#b91c1c}
-#bar{display:flex;gap:8px;padding:10px;background:#fff;border-top:1px solid #ddd}
-#bar input{flex:1;padding:10px;border:1px solid #ccc;border-radius:8px}
-#bar button{padding:0 18px;border:0;border-radius:8px;background:#2563eb;color:#fff}
-#bar:has(input:disabled){opacity:.5}
-@media(max-width:700px){body{flex-direction:column}#list{width:100%;height:35%}}
-</style></head><body>
-<div id="list"></div>
-<div id="main"><div id="head">Select a conversation</div><div id="note"></div>
-<div id="msgs"></div>
-<div id="bar"><input id="txt" placeholder="Type a reply" disabled><button id="go">Send</button></div></div>
-<script>
-let pw = sessionStorage.pw || prompt("Admin password"), cur = null, curName = "";
-sessionStorage.pw = pw || "";
-const $ = (id) => document.getElementById(id);
-function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
-async function api(path, opt = {}) {
-  const r = await fetch(path, { ...opt, headers: { "x-admin-password": pw, "Content-Type": "application/json" } });
-  if (r.status === 401) { sessionStorage.removeItem("pw"); location.reload(); }
-  return r.json();
-}
-async function loadList() {
-  const { conversations = [] } = await api("/api/conversations");
-  const list = $("list"); list.replaceChildren();
-  for (const c of conversations) {
-    const d = el("div", "c" + (c.wa_id === cur ? " on" : ""));
-    const top = el("b", null, c.name || "+" + c.wa_id);
-    if (c.unread > 0) top.append(el("span", "u", c.unread));
-    d.append(top, el("small", null, c.last_body || ""));
-    d.onclick = () => { cur = c.wa_id; curName = c.name || "+" + c.wa_id; loadList(); loadThread(); };
-    list.append(d);
-  }
-}
-async function loadThread() {
-  if (!cur) return;
-  const { messages = [], last_inbound_at } = await api("/api/messages?wa_id=" + cur);
-  $("head").textContent = curName;
-  const box = $("msgs"), stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
-  box.replaceChildren();
-  for (const m of messages) {
-    const d = el("div", "m " + m.direction, m.body);
-    const t = new Date(m.created_at).toLocaleString();
-    d.append(el("i", m.error ? "err" : "", m.direction === "out" ? `${t} · ${m.status}${m.error ? " · " + m.error : ""}` : t));
-    box.append(d);
-  }
-  if (stick) box.scrollTop = box.scrollHeight;
-  const open = last_inbound_at && Date.now() - new Date(last_inbound_at) < 864e5;
-  $("txt").disabled = !open;
-  $("note").style.display = open ? "none" : "block";
-  $("note").textContent = "24-hour window closed. You can only send approved templates to this contact.";
-}
-async function send() {
-  const text = $("txt").value.trim(); if (!text || !cur) return;
-  $("txt").value = "";
-  const r = await api("/api/send", { method: "POST", body: JSON.stringify({ to: cur, text }) });
-  if (r.error) alert(r.error);
-  loadThread(); loadList();
-}
-$("go").onclick = send;
-$("txt").onkeydown = (e) => { if (e.key === "Enter") send(); };
-loadList(); setInterval(() => { loadList(); loadThread(); }, 8000);
-</script></body></html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <title>Briwill Inbox</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --app: #f4f6f8;
+        --surface: #fff;
+        --hover: #f1f5f9;
+        --sel: #eef4ff;
+        --out: #dbeafe;
+        --border: #e5e7eb;
+        --text: #0f172a;
+        --muted: #64748b;
+        --err: #b91c1c;
+        --warnbg: #fef3c7;
+        --warn: #92400e;
+        --brand: #2563eb;
+        --soft: #dbeafe;
+        --ok: #16a34a;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        font:
+          14px/1.4 Inter,
+          system-ui,
+          sans-serif;
+        background: var(--app);
+        color: var(--text);
+        display: flex;
+        overflow: hidden;
+      }
+      button,
+      input {
+        font: inherit;
+        color: inherit;
+      }
+      #list {
+        width: 380px;
+        flex: none;
+        background: var(--surface);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        height: 100dvh;
+      }
+      #lh {
+        padding: calc(24px + env(safe-area-inset-top)) 20px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      h1 {
+        font-size: 24px;
+        font-weight: 600;
+      }
+      .sub {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      #q {
+        width: 100%;
+        border: 0;
+        background: var(--hover);
+        border-radius: 12px;
+        padding: 12px 14px;
+        font-size: 16px;
+        outline: 0;
+      }
+      .pills {
+        display: flex;
+        gap: 8px;
+        overflow-x: auto;
+      }
+      .pill {
+        border: 0;
+        background: var(--hover);
+        color: var(--muted);
+        border-radius: 16px;
+        padding: 8px 14px;
+        font-weight: 500;
+        font-size: 13px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .pill.on {
+        background: var(--soft);
+        color: var(--brand);
+      }
+      #rows {
+        flex: 1;
+        overflow: auto;
+      }
+      .row {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        padding: 14px 20px;
+        border-bottom: 1px solid var(--border);
+        cursor: pointer;
+      }
+      .row:hover {
+        background: var(--hover);
+      }
+      .row.on {
+        background: var(--sel);
+      }
+      .av {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: var(--soft);
+        color: var(--brand);
+        font-weight: 600;
+        display: grid;
+        place-items: center;
+        flex: none;
+      }
+      .rb {
+        flex: 1;
+        min-width: 0;
+      }
+      .l1,
+      .l2 {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .l2 {
+        margin-top: 2px;
+      }
+      .nm {
+        flex: 1;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .tm {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .pv {
+        flex: 1;
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .bd {
+        background: var(--brand);
+        color: #fff;
+        font-size: 11px;
+        font-weight: 600;
+        border-radius: 10px;
+        padding: 2px 7px;
+      }
+      .none {
+        padding: 32px 20px;
+        color: var(--muted);
+        text-align: center;
+      }
+      #main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        height: 100dvh;
+      }
+      #empty {
+        margin: auto;
+        color: var(--muted);
+        text-align: center;
+        padding: 24px;
+      }
+      #thread {
+        display: none;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+      }
+      body.open #thread {
+        display: flex;
+      }
+      body.open #empty {
+        display: none;
+      }
+      #th {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        padding: calc(14px + env(safe-area-inset-top)) 24px 14px;
+      }
+      #back {
+        display: none;
+        width: 44px;
+        height: 44px;
+        border: 0;
+        background: none;
+        place-items: center;
+        cursor: pointer;
+        margin-left: -12px;
+      }
+      #th .av {
+        width: 40px;
+        height: 40px;
+        font-size: 13px;
+      }
+      .who {
+        flex: 1;
+        min-width: 0;
+      }
+      .who b {
+        display: block;
+        font-size: 16px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .who span {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      #win {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--soft);
+        color: var(--brand);
+        font-size: 12px;
+        font-weight: 500;
+        border-radius: 16px;
+        padding: 7px 14px;
+      }
+      #win::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--ok);
+      }
+      #win.closed {
+        background: var(--warnbg);
+        color: var(--warn);
+      }
+      #win.closed::before {
+        background: #d97706;
+      }
+      #msgs {
+        flex: 1;
+        overflow: auto;
+        padding: 24px 32px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .b {
+        align-self: flex-start;
+        max-width: min(70%, 520px);
+        padding: 10px 14px 8px;
+        border-radius: 16px 16px 16px 4px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .b.out {
+        align-self: flex-end;
+        background: var(--out);
+        border-color: transparent;
+        border-radius: 16px 16px 4px 16px;
+      }
+      .mt {
+        display: block;
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 4px;
+      }
+      .mt.err {
+        color: var(--err);
+      }
+      .dd {
+        align-self: center;
+        background: var(--hover);
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 500;
+        border-radius: 12px;
+        padding: 4px 12px;
+        margin: 4px 0;
+      }
+      #bar {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        background: var(--surface);
+        border-top: 1px solid var(--border);
+        padding: 14px 24px calc(14px + env(safe-area-inset-bottom));
+      }
+      #txt {
+        flex: 1;
+        min-width: 0;
+        border: 0;
+        background: var(--hover);
+        border-radius: 22px;
+        padding: 12px 18px;
+        font-size: 16px;
+        outline: 0;
+      }
+      #txt:disabled {
+        opacity: 0.6;
+      }
+      #go {
+        width: 44px;
+        height: 44px;
+        border: 0;
+        border-radius: 50%;
+        background: var(--brand);
+        display: grid;
+        place-items: center;
+        cursor: pointer;
+        flex: none;
+      }
+      #go:disabled {
+        opacity: 0.5;
+      }
+      @media (max-width: 767px) {
+        body {
+          display: block;
+        }
+        #list {
+          width: 100%;
+          border: 0;
+        }
+        #main {
+          display: none;
+          width: 100%;
+        }
+        body.open #list {
+          display: none;
+        }
+        body.open #main {
+          display: flex;
+        }
+        #th {
+          flex-wrap: wrap;
+          padding: calc(10px + env(safe-area-inset-top)) 16px 12px 8px;
+        }
+        #back {
+          display: grid;
+        }
+        #win {
+          order: 9;
+          flex: 1 0 100%;
+          border-radius: 0;
+          margin: 8px -16px -12px -8px;
+          padding: 7px 16px;
+        }
+        #msgs {
+          padding: 16px 12px;
+        }
+        .b {
+          max-width: 82%;
+        }
+        #bar {
+          padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <aside id="list">
+      <div id="lh">
+        <div>
+          <h1>Inbox</h1>
+          <div class="sub">WhatsApp · +234 707 785 5269</div>
+        </div>
+        <input id="q" type="search" placeholder="Search conversations" />
+        <div class="pills">
+          <button class="pill on" data-f="all">All</button
+          ><button class="pill" data-f="unread">Unread</button
+          ><button class="pill" data-f="waiting">Waiting for reply</button>
+        </div>
+      </div>
+      <div id="rows"></div>
+    </aside>
+    <main id="main">
+      <div id="empty">
+        <b>Select a conversation</b>
+        <div class="sub">Replies from your waitlist will appear here.</div>
+      </div>
+      <section id="thread">
+        <header id="th">
+          <button id="back" aria-label="Back">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M15 5l-7 7 7 7"
+                stroke="#0F172A"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+          <div class="av" id="tav"></div>
+          <div class="who"><b id="tname"></b><span id="tnum"></span></div>
+          <div id="win"></div>
+        </header>
+        <div id="msgs"></div>
+        <div id="bar">
+          <input
+            id="txt"
+            placeholder="Type a reply"
+            autocomplete="off"
+          /><button id="go" aria-label="Send">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M5 12h14M13 6l6 6-6 6"
+                stroke="#fff"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+      </section>
+    </main>
+    <script>
+      let pw = sessionStorage.pw || prompt("Admin password") || "";
+      sessionStorage.pw = pw;
+      const $ = (id) => document.getElementById(id);
+      const el = (t, c, x) => {
+        const e = document.createElement(t);
+        if (c) e.className = c;
+        if (x != null) e.textContent = x;
+        return e;
+      };
+      let convs = [],
+        cur = null,
+        filter = "all",
+        lastInbound = null,
+        listKey = "",
+        threadKey = "";
+
+      async function api(path, opt = {}) {
+        const r = await fetch(path, {
+          ...opt,
+          headers: {
+            "x-admin-password": pw,
+            "Content-Type": "application/json",
+          },
+        });
+        if (r.status === 401) {
+          sessionStorage.removeItem("pw");
+          location.reload();
+          return {};
+        }
+        return r.json();
+      }
+      const nameOf = (c) => c.name || "+" + c.wa_id;
+      const initials = (c) =>
+        c.name
+          ? c.name
+              .trim()
+              .split(/\s+/)
+              .map((w) => w[0])
+              .slice(0, 2)
+              .join("")
+              .toUpperCase()
+          : "#";
+      const dayDiff = (d) => {
+        const s = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate());
+        return Math.round((s(new Date()) - s(d)) / 864e5);
+      };
+      function when(v) {
+        const d = new Date(v),
+          n = dayDiff(d);
+        if (n <= 0)
+          return d.toLocaleTimeString([], {
+            hour: "numeric",
+            minute: "2-digit",
+          });
+        if (n === 1) return "Yesterday";
+        if (n < 7) return d.toLocaleDateString([], { weekday: "short" });
+        return d.toLocaleDateString([], { day: "numeric", month: "short" });
+      }
+      function dayLabel(v) {
+        const d = new Date(v),
+          n = dayDiff(d);
+        return n <= 0
+          ? "Today"
+          : n === 1
+            ? "Yesterday"
+            : d.toLocaleDateString([], {
+                day: "numeric",
+                month: "long",
+                year: "numeric",
+              });
+      }
+
+      function renderList() {
+        const q = $("q").value.trim().toLowerCase();
+        const unread = convs.reduce((n, c) => n + (c.unread > 0 ? 1 : 0), 0);
+        document.querySelector('[data-f="unread"]').textContent = unread
+          ? "Unread " + unread
+          : "Unread";
+        const items = convs.filter(
+          (c) =>
+            (!q ||
+              nameOf(c).toLowerCase().includes(q) ||
+              (c.last_body || "").toLowerCase().includes(q)) &&
+            (filter === "all" ||
+              (filter === "unread" && c.unread > 0) ||
+              (filter === "waiting" && c.last_direction === "in")),
+        );
+        const key = JSON.stringify([items, cur, unread]);
+        if (key === listKey) return;
+        listKey = key;
+        const box = $("rows");
+        box.replaceChildren();
+        if (!items.length) {
+          box.append(el("div", "none", "No conversations"));
+          return;
+        }
+        for (const c of items) {
+          const row = el("div", "row" + (c.wa_id === cur ? " on" : ""));
+          row.append(el("div", "av", initials(c)));
+          const rb = el("div", "rb"),
+            l1 = el("div", "l1"),
+            l2 = el("div", "l2");
+          l1.append(
+            el("span", "nm", nameOf(c)),
+            el("span", "tm", c.last_message_at ? when(c.last_message_at) : ""),
+          );
+          l2.append(el("span", "pv", c.last_body || ""));
+          if (c.unread > 0) l2.append(el("span", "bd", c.unread));
+          rb.append(l1, l2);
+          row.append(rb);
+          row.onclick = () => {
+            location.hash = c.wa_id;
+          };
+          box.append(row);
+        }
+      }
+      async function loadList() {
+        const r = await api("/api/conversations");
+        convs = r.conversations || [];
+        renderList();
+      }
+
+      function setWindow() {
+        const left = lastInbound
+          ? new Date(lastInbound).getTime() + 864e5 - Date.now()
+          : 0;
+        const open = left > 0,
+          w = $("win");
+        w.className = open ? "" : "closed";
+        const h = Math.floor(left / 36e5),
+          m = Math.floor(left / 6e4);
+        w.textContent = open
+          ? `24-hour window open · ${h >= 1 ? h + "h" : m + "m"} left`
+          : "24-hour window closed · templates only";
+        $("txt").disabled = !open;
+        $("go").disabled = !open;
+        $("txt").placeholder = open
+          ? "Type a reply"
+          : "Window closed. Replies unavailable";
+      }
+      async function loadThread(force) {
+        if (!cur) return;
+        const id = cur;
+        const r = await api("/api/messages?wa_id=" + encodeURIComponent(id));
+        if (id !== cur) return;
+        const messages = r.messages || [];
+        lastInbound = r.last_inbound_at;
+        setWindow();
+        const c = convs.find((x) => x.wa_id === id) || { wa_id: id };
+        $("tname").textContent = nameOf(c);
+        $("tnum").textContent = "+" + id;
+        $("tav").textContent = initials(c);
+        const key = JSON.stringify(
+          messages.map((m) => [m.id, m.status, m.error]),
+        );
+        if (!force && key === threadKey) return;
+        threadKey = key;
+        const box = $("msgs"),
+          stick =
+            force || box.scrollTop + box.clientHeight >= box.scrollHeight - 60;
+        box.replaceChildren();
+        let day = "";
+        for (const m of messages) {
+          const dl = dayLabel(m.created_at);
+          if (dl !== day) {
+            day = dl;
+            box.append(el("div", "dd", dl));
+          }
+          const b = el("div", "b " + m.direction, m.body);
+          const t = new Date(m.created_at).toLocaleTimeString([], {
+            hour: "numeric",
+            minute: "2-digit",
+          });
+          const label =
+            m.direction === "out"
+              ? `${t} · ${m.status === "failed" ? "Failed" : m.status}${m.error ? " · " + m.error : ""}`
+              : t;
+          b.append(
+            el("span", "mt" + (m.status === "failed" ? " err" : ""), label),
+          );
+          box.append(b);
+        }
+        if (stick) box.scrollTop = box.scrollHeight;
+      }
+
+      function route() {
+        cur = decodeURIComponent(location.hash.slice(1)) || null;
+        document.body.classList.toggle("open", !!cur);
+        threadKey = "";
+        listKey = "";
+        renderList();
+        if (cur) loadThread(true);
+      }
+      async function send() {
+        const text = $("txt").value.trim();
+        if (!text || !cur) return;
+        $("go").disabled = true;
+        $("txt").value = "";
+        const r = await api("/api/send", {
+          method: "POST",
+          body: JSON.stringify({ to: cur, text }),
+        });
+        if (r.error) {
+          alert(r.error);
+          $("txt").value = text;
+        }
+        await loadThread(true);
+        loadList();
+        setWindow();
+      }
+      $("go").onclick = send;
+      $("txt").onkeydown = (e) => {
+        if (e.key === "Enter") send();
+      };
+      $("q").oninput = renderList;
+      $("back").onclick = () => {
+        location.hash = "";
+      };
+      document.querySelectorAll(".pill").forEach(
+        (p) =>
+          (p.onclick = () => {
+            filter = p.dataset.f;
+            document
+              .querySelectorAll(".pill")
+              .forEach((x) => x.classList.toggle("on", x === p));
+            renderList();
+          }),
+      );
+      window.addEventListener("hashchange", route);
+      loadList().then(route);
+      setInterval(() => {
+        if (document.hidden) return;
+        loadList();
+        if (cur) loadThread(false);
+      }, 8000);
+    </script>
+  </body>
+</html>
